@@ -1,0 +1,7 @@
+const express=require('express'),DB=require('better-sqlite3'),{parse}=require('csv-parse/sync');
+const app=express(),db=new DB('lazera.db');db.exec('CREATE TABLE IF NOT EXISTS sales(id INTEGER PRIMARY KEY,date TEXT,product TEXT,quantity REAL,amount REAL)');
+app.use(express.json({limit:'2mb'}));app.use(express.static('public'));
+app.get('/api/summary',(req,res)=>{const total=db.prepare('SELECT COALESCE(SUM(amount),0) revenue,COUNT(*) orders,COALESCE(SUM(quantity),0) units FROM sales').get();const months=db.prepare("SELECT substr(date,1,7) month,SUM(amount) revenue FROM sales GROUP BY month ORDER BY month").all();const products=db.prepare('SELECT product,SUM(amount) revenue FROM sales GROUP BY product ORDER BY revenue DESC').all();res.json({total,months,products})});
+app.post('/api/import',(req,res)=>{try{const rows=parse(req.body.csv,{columns:true,skip_empty_lines:true,trim:true});const ins=db.prepare('INSERT INTO sales(date,product,quantity,amount) VALUES(?,?,?,?)');const tx=db.transaction(items=>items.forEach(r=>{const d=new Date(r.date),q=Number(r.quantity),a=Number(r.amount);if(!r.product||isNaN(d)||!Number.isFinite(q)||!Number.isFinite(a))throw Error('Invalid CSV row');ins.run(d.toISOString().slice(0,10),r.product,q,a)}));tx(rows);res.json({imported:rows.length})}catch(e){res.status(400).json({error:e.message})}});
+app.delete('/api/sales',(req,res)=>{db.prepare('DELETE FROM sales').run();res.json({ok:true})});
+app.listen(process.env.PORT||8014,()=>console.log('LAZERA on http://localhost:'+(process.env.PORT||8014)));
